@@ -248,6 +248,7 @@ class StableDiffusionXLControlNetInpaintPipeline(
     ):
         super().__init__()
 
+        print("EDITED PIPELINE")
         if isinstance(controlnet, (list, tuple)):
             controlnet = MultiControlNetModel(controlnet)
 
@@ -1211,6 +1212,7 @@ class StableDiffusionXLControlNetInpaintPipeline(
             Union[Callable[[int, int, Dict], None], PipelineCallback, MultiPipelineCallbacks]
         ] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
+        mask_optional: Optional[torch.Tensor] = None,
         **kwargs,
     ):
         r"""
@@ -1454,6 +1456,11 @@ class StableDiffusionXLControlNetInpaintPipeline(
             batch_size = prompt_embeds.shape[0]
 
         device = self._execution_device
+    
+        if mask_optional is not None:
+            # set mask_optional to device of controlnet
+            mask_optional = mask_optional.to(device)
+
 
         if isinstance(controlnet, MultiControlNetModel) and isinstance(controlnet_conditioning_scale, float):
             controlnet_conditioning_scale = [controlnet_conditioning_scale] * len(controlnet.nets)
@@ -1750,6 +1757,7 @@ class StableDiffusionXLControlNetInpaintPipeline(
                 # if control_image.shape[-2:] != control_model_input.shape[-2:]:
                 #     control_image = F.interpolate(control_image, size=control_model_input.shape[-2:], mode="bilinear", align_corners=False)
 
+
                 down_block_res_samples, mid_block_res_sample = self.controlnet(
                     control_model_input,
                     t,
@@ -1759,6 +1767,7 @@ class StableDiffusionXLControlNetInpaintPipeline(
                     guess_mode=guess_mode,
                     added_cond_kwargs=controlnet_added_cond_kwargs,
                     return_dict=False,
+                    mask_optional=mask_optional
                 )
 
                 if guess_mode and self.do_classifier_free_guidance:

@@ -676,6 +676,7 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         added_cond_kwargs: Optional[Dict[str, torch.Tensor]] = None,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         guess_mode: bool = False,
+        mask_optional: Optional[torch.Tensor] = None,
         return_dict: bool = True,
     ) -> Union[ControlNetOutput, Tuple[Tuple[torch.Tensor, ...], torch.Tensor]]:
         """
@@ -804,11 +805,12 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
+
+
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
                     temb=emb,
                     encoder_hidden_states=encoder_hidden_states,
-                    attention_mask=attention_mask,
                     cross_attention_kwargs=cross_attention_kwargs,
                 )
             else:
@@ -829,16 +831,48 @@ class ControlNetModel(ModelMixin, ConfigMixin, FromOriginalModelMixin):
             else:
                 sample = self.mid_block(sample, emb)
 
+        # # 5. Control net blocks
+        # controlnet_down_block_res_samples = ()
+
+        # for down_block_res_sample, controlnet_block in zip(down_block_res_samples, self.controlnet_down_blocks):
+        #     down_block_res_sample = controlnet_block(down_block_res_sample)
+        #     controlnet_down_block_res_samples = controlnet_down_block_res_samples + (down_block_res_sample,)
+
+        # down_block_res_samples = controlnet_down_block_res_samples
+
+        # mid_block_res_sample = self.controlnet_mid_block(sample)
+
+
         # 5. Control net blocks
         controlnet_down_block_res_samples = ()
 
+
+        # print sizes of the inputs 
+        # Add batch and channel dimensions to mask_optional
+        if mask_optional is not None:
+            mask_optional = mask_optional.unsqueeze(0).unsqueeze(0)  # Add batch and channel dimensions
+
+
         for down_block_res_sample, controlnet_block in zip(down_block_res_samples, self.controlnet_down_blocks):
             down_block_res_sample = controlnet_block(down_block_res_sample)
+            # *** APPLY MASK HERE ***
+            if mask_optional is not None:
+                mask = F.interpolate(mask_optional, size=(down_block_res_sample.shape[2], down_block_res_sample.shape[3]), mode="bilinear", align_corners=False)
+                # Ensure mask has the same number of channels as down_block_res_sample
+                mask = mask.repeat(down_block_res_sample.shape[0], down_block_res_sample.shape[1], 1, 1)
+                down_block_res_sample = down_block_res_sample * mask
+
+            
             controlnet_down_block_res_samples = controlnet_down_block_res_samples + (down_block_res_sample,)
+
 
         down_block_res_samples = controlnet_down_block_res_samples
 
         mid_block_res_sample = self.controlnet_mid_block(sample)
+        if mask_optional is not None:
+            mask = F.interpolate(mask_optional, size=mid_block_res_sample.shape[-2:], mode="bilinear", align_corners=False)            
+            mid_block_res_sample = mid_block_res_sample * mask
+
 
         # 6. scaling
         if guess_mode and not self.config.global_pool_conditions:
